@@ -1,1 +1,0 @@
-# eventchain-smart-contract
