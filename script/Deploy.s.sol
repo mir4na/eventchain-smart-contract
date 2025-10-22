@@ -6,17 +6,23 @@ import {console} from "forge-std/console.sol";
 import {EventChain} from "../src/EventChain.sol";
 
 contract EventChainScript is Script {
-    EventChain public eventChain;
-
-    function setUp() public {}
-
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        address deployer = vm.addr(deployerPrivateKey);
+
         vm.startBroadcast(deployerPrivateKey);
 
-        eventChain = new EventChain();
-        
-        console.log("EventChain deployed at:", address(eventChain));
+        EventChain eventChain = new EventChain();
+
+        address platformWallet = vm.envOr("PLATFORM_WALLET", address(0));
+        if (platformWallet != address(0)) {
+            eventChain.setPlatformWallet(platformWallet);
+        }
+
+        address initialAdmin = vm.envOr("INITIAL_ADMIN", address(0));
+        if (initialAdmin != address(0) && initialAdmin != deployer) {
+            eventChain.addAdmin(initialAdmin);
+        }
 
         vm.stopBroadcast();
     }
