@@ -1,66 +1,33 @@
-## Foundry
+# MyMineTicketKu — Smart Contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+This repository contains the Solidity smart contracts powering the MyMineTicketKu decentralized NFT ticketing platform. Built with Foundry and OpenZeppelin, the contracts support secure event creation, NFT-based ticketing, anti-scalping mechanisms, and automatic revenue distribution.
 
-Foundry consists of:
+## 🏗️ Tech Stack
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+- **Language**: Solidity ^0.8.30
+- **Libraries**: OpenZeppelin (ERC721, ReentrancyGuard, AccessControl)
+- **Tooling**: Foundry (Forge, Cast, Anvil)
+- **Testing**: Forge test suite
 
-## Documentation
+## 🎫 Core Features
 
-https://book.getfoundry.sh/
+### Event & Ticket Management
+- Event organizers (EOs) create events with configurable ticket types (Regular, VIP, etc.)  
+- Each ticket is an ERC721 NFT (unique, collectible, transferable)  
 
-## Usage
+### Anti-Scalping & Resale Rules
+- Max **5 tickets per user per event**  
+- Resale allowed **only once** per ticket  
+- Resale price capped at **120%** of original price  
+- Resale listings expire after a deadline set by seller  
 
-### Build
+### Revenue Distribution (on resale)
+- **5% royalty** to Event Organizer  
+- **2.5% platform fee**  
+- Enforced via ERC721 royalty mechanism (**500 + 250 basis points**)  
 
-```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+### Security
+- Reentrancy protection (`ReentrancyGuard`)  
+- Role-based access control (`AccessControl`)  
+- Input validation  
+- Emergency stop capability  
