@@ -66,8 +66,8 @@ contract EventChainTest is Test {
         beneficiaries[1] = platform;
 
         uint256[] memory percentages = new uint256[](2);
-        percentages[0] = 8000; // 80%
-        percentages[1] = 2000; // 20%
+        percentages[0] = 8000;
+        percentages[1] = 2000;
 
         vm.prank(buyer1);
         uint256[] memory ticketIds = eventChain.buyTickets{value: totalCost}(
