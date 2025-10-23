@@ -6,41 +6,33 @@ import {EventChainErrors} from "./EventChainErrors.sol";
 
 abstract contract EventChainModifiers is EventChainStorage {
     modifier onlyOwner() {
-        if (msg.sender != _contractOwner) {
-            revert EventChainErrors.Unauthorized();
-        }
-        _;
-    }
-
-    modifier onlyAdmin() {
-        if (!admins[msg.sender] && msg.sender != _contractOwner) {
-            revert EventChainErrors.OnlyAdmin();
-        }
-        _;
-    }
-
-    modifier eventExists(uint256 eventId) {
-        if (_events[eventId].eventId == 0) {
-            revert EventChainErrors.EventNotFound();
-        }
+        if (msg.sender != _contractOwner) revert EventChainErrors.Unauthorized();
         _;
     }
 
     modifier ticketExists(uint256 ticketId) {
-        if (_tickets[ticketId].ticketId == 0) {
-            revert EventChainErrors.TicketNotFound();
-        }
+        if (_tickets[ticketId].mintedAt == 0) revert EventChainErrors.TicketNotFound();
         _;
     }
 
-    modifier onlyEventCreator(uint256 eventId) {
-        if (msg.sender != _events[eventId].eventCreator) {
-            revert EventChainErrors.OnlyEventCreator();
-        }
+    modifier eventConfigured(uint256 eventId) {
+        if (_eventCreators[eventId] == address(0)) revert EventChainErrors.EventNotConfigured();
         _;
     }
 
-    function owner() public view returns (address) {
-        return _contractOwner;
+    modifier eventNotFinalized(uint256 eventId) {
+        if (_eventFinalized[eventId]) revert EventChainErrors.EventAlreadyFinalized();
+        _;
+    }
+
+    modifier withinPurchaseLimit(uint256 eventId, uint256 quantity) {
+        if (quantity == 0 || quantity > MAX_TICKETS_PER_PURCHASE) {
+            revert EventChainErrors.MaxTicketsExceeded();
+        }
+        uint256 currentCount = _userEventTicketCount[msg.sender][eventId];
+        if (currentCount + quantity > MAX_TICKETS_PER_PURCHASE) {
+            revert EventChainErrors.PurchaseLimitReached();
+        }
+        _;
     }
 }
