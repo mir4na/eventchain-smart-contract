@@ -3,26 +3,26 @@ pragma solidity ^0.8.30;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EventChainStorage} from "./EventChainStorage.sol";
 import {EventChainModifiers} from "./EventChainModifiers.sol";
 import {EventChainEvents} from "./EventChainEvents.sol";
 import {EventChainTypes} from "./EventChainTypes.sol";
 import {EventChainErrors} from "./EventChainErrors.sol";
 
-contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainEvents {
-    constructor() ERC721("EventChain Ticket", "EVTKT") {
+contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainModifiers, EventChainEvents {
+    using ECDSA for bytes32;
+
+    constructor(
+        address _platformWallet,
+        address _backendSigner
+    ) ERC721("EventChain Ticket", "EVTKT") {
+        if (_platformWallet == address(0)) revert EventChainErrors.InvalidAddress();
+        if (_backendSigner == address(0)) revert EventChainErrors.InvalidAddress();
+
         _contractOwner = msg.sender;
-    }
-
-    function addAdmin(address admin) external onlyOwner {
-        if (admin == address(0)) revert EventChainErrors.InvalidAddress();
-        admins[admin] = true;
-        emit AdminAdded(admin);
-    }
-
-    function removeAdmin(address admin) external onlyOwner {
-        admins[admin] = false;
-        emit AdminRemoved(admin);
+        platformWallet = _platformWallet;
+        backendSigner = _backendSigner;
     }
 
     function setPlatformWallet(address wallet) external onlyOwner {
@@ -31,202 +31,106 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
         emit PlatformWalletUpdated(wallet);
     }
 
-    function createEvent(
-        string calldata eventName,
-        string calldata eventURI,
-        string calldata documentURI,
-        uint256 eventDate,
-        address[] calldata revenueBeneficiaries,
-        uint256[] calldata percentages
-    ) external returns (uint256) {
-        if (eventDate <= block.timestamp) revert EventChainErrors.InvalidDate();
-        if (revenueBeneficiaries.length != percentages.length) {
-            revert EventChainErrors.InvalidPercentage();
-        }
-        if (revenueBeneficiaries.length == 0) {
-            revert EventChainErrors.InvalidAmount();
-        }
-
-        _validatePercentages(percentages);
-
-        unchecked {
-            ++_currentEventId;
-        }
-        uint256 eventId = _currentEventId;
-
-        _events[eventId] = EventChainTypes.Event({
-            eventId: eventId,
-            eventCreator: msg.sender,
-            eventName: eventName,
-            eventURI: eventURI,
-            documentURI: documentURI,
-            eventDate: eventDate,
-            eventActive: false,
-            status: EventChainTypes.EventStatus.Pending,
-            createdAt: block.timestamp,
-            approvedAt: 0
-        });
-
-        _setupRevenueShares(eventId, revenueBeneficiaries, percentages);
-        _eoEvents[msg.sender].push(eventId);
-
-        emit EventCreated(eventId, msg.sender, eventName);
-        return eventId;
+    function setBackendSigner(address signer) external onlyOwner {
+        if (signer == address(0)) revert EventChainErrors.InvalidAddress();
+        backendSigner = signer;
+        emit BackendSignerUpdated(signer);
     }
 
-    function approveEvent(uint256 eventId) external onlyAdmin eventExists(eventId) {
-        EventChainTypes.Event storage eventData = _events[eventId];
-
-        if (eventData.status != EventChainTypes.EventStatus.Pending) {
-            revert EventChainErrors.EventAlreadyProcessed();
-        }
-
-        eventData.status = EventChainTypes.EventStatus.Approved;
-        eventData.approvedAt = block.timestamp;
-
-        emit EventApproved(eventId, eventData.eventCreator);
+    function registerEO(address eoAddress) external onlyOwner {
+        if (eoAddress == address(0)) revert EventChainErrors.InvalidAddress();
+        _eoAddresses[eoAddress] = true;
+        emit EORegistered(eoAddress);
     }
 
-    function rejectEvent(uint256 eventId) external onlyAdmin eventExists(eventId) {
-        EventChainTypes.Event storage eventData = _events[eventId];
-
-        if (eventData.status != EventChainTypes.EventStatus.Pending) {
-            revert EventChainErrors.EventAlreadyProcessed();
-        }
-
-        eventData.status = EventChainTypes.EventStatus.Rejected;
-
-        emit EventRejected(eventId, eventData.eventCreator);
+    function removeEO(address eoAddress) external onlyOwner {
+        _eoAddresses[eoAddress] = false;
+        emit EORemoved(eoAddress);
     }
 
-    function addTicketType(
+    function isEO(address account) external view returns (bool) {
+        return _eoAddresses[account];
+    }
+
+    function configureEvent(
         uint256 eventId,
-        string calldata typeName,
-        uint256 price,
-        uint256 supply,
-        uint256 saleStart,
-        uint256 saleEnd
-    ) external eventExists(eventId) onlyEventCreator(eventId) returns (uint256) {
-        EventChainTypes.Event storage eventData = _events[eventId];
+        address eventCreator,
+        address taxWallet
+    ) external onlyOwner returns (bool) {
+        if (eventCreator == address(0)) revert EventChainErrors.InvalidAddress();
+        if (taxWallet == address(0)) revert EventChainErrors.InvalidAddress();
+        if (_eventCreators[eventId] != address(0)) revert EventChainErrors.EventAlreadyConfigured();
+        if (!_eoAddresses[eventCreator]) revert EventChainErrors.NotEventOrganizer();
 
-        if (eventData.status != EventChainTypes.EventStatus.Approved) {
-            revert EventChainErrors.EventNotApproved();
-        }
-        if (price == 0) revert EventChainErrors.InvalidPrice();
-        if (supply == 0) revert EventChainErrors.InvalidAmount();
-        if (saleStart < block.timestamp) revert EventChainErrors.InvalidDate();
-        if (saleEnd <= saleStart) revert EventChainErrors.InvalidDate();
-        if (saleEnd > eventData.eventDate) revert EventChainErrors.InvalidDate();
+        _eventCreators[eventId] = eventCreator;
+        _taxWallets[eventId] = taxWallet;
+        _eventFinalized[eventId] = false;
 
-        unchecked {
-            ++_currentTicketTypeId;
-        }
-        uint256 typeId = _currentTicketTypeId;
-
-        _ticketTypes[eventId][typeId] = EventChainTypes.TicketType({
-            typeId: typeId,
-            typeName: typeName,
-            price: price,
-            totalSupply: supply,
-            sold: 0,
-            saleStartTime: saleStart,
-            saleEndTime: saleEnd,
-            active: true
-        });
-
-        _eventTicketTypes[eventId].push(typeId);
-
-        if (!eventData.eventActive) {
-            eventData.eventActive = true;
-        }
-
-        emit TicketTypeAdded(eventId, typeId, typeName, price, supply);
-        return typeId;
+        emit RevenueConfigured(eventId, eventCreator, taxWallet);
+        return true;
     }
 
-    function updateTicketType(
+    function setTicketTypePrice(
         uint256 eventId,
         uint256 typeId,
-        uint256 price,
-        uint256 supply,
-        uint256 saleStart,
-        uint256 saleEnd,
-        bool active
-    ) external eventExists(eventId) onlyEventCreator(eventId) {
-        EventChainTypes.TicketType storage ticketType = _ticketTypes[eventId][typeId];
-        
-        if (ticketType.typeId == 0) revert EventChainErrors.TicketTypeNotFound();
-        if (price == 0) revert EventChainErrors.InvalidPrice();
-        if (supply < ticketType.sold) revert EventChainErrors.InvalidAmount();
-        if (saleStart < block.timestamp) revert EventChainErrors.InvalidDate();
-        if (saleEnd <= saleStart) revert EventChainErrors.InvalidDate();
-        if (saleEnd > _events[eventId].eventDate) revert EventChainErrors.InvalidDate();
+        uint256 price
+    ) external onlyOwner eventConfigured(eventId) eventNotFinalized(eventId) {
+        if (price == 0) revert EventChainErrors.InvalidAmount();
 
-        ticketType.price = price;
-        ticketType.totalSupply = supply;
-        ticketType.saleStartTime = saleStart;
-        ticketType.saleEndTime = saleEnd;
-        ticketType.active = active;
+        _ticketTypePrices[eventId][typeId] = price;
+        emit TicketTypePriceSet(eventId, typeId, price);
+    }
 
-        emit TicketTypeUpdated(eventId, typeId, price, supply);
+    function finalizeEvent(uint256 eventId) external onlyOwner eventConfigured(eventId) {
+        if (_eventFinalized[eventId]) revert EventChainErrors.EventAlreadyFinalized();
+
+        _eventFinalized[eventId] = true;
+        emit EventFinalized(eventId);
     }
 
     function buyTickets(
         uint256 eventId,
         uint256 typeId,
-        uint256 quantity
-    ) external payable eventExists(eventId) nonReentrant {
-        if (quantity == 0 || quantity > MAX_TICKETS_PER_PURCHASE) {
-            revert EventChainErrors.InvalidAmount();
-        }
+        uint256 quantity,
+        address[] calldata beneficiaries,
+        uint256[] calldata percentages
+    ) external payable nonReentrant eventConfigured(eventId) eventNotFinalized(eventId) withinPurchaseLimit(eventId, quantity) returns (uint256[] memory) {
+        if (_eoAddresses[msg.sender]) revert EventChainErrors.EOCannotBuyTickets();
+        if (beneficiaries.length != percentages.length) revert EventChainErrors.InvalidAmount();
 
-        EventChainTypes.Event storage eventData = _events[eventId];
-        EventChainTypes.TicketType storage ticketType = _ticketTypes[eventId][typeId];
+        uint256 pricePerTicket = _ticketTypePrices[eventId][typeId];
+        if (pricePerTicket == 0) revert EventChainErrors.TicketTypeNotConfigured();
 
-        if (eventData.status != EventChainTypes.EventStatus.Approved) {
-            revert EventChainErrors.EventNotApproved();
-        }
-        if (!eventData.eventActive) revert EventChainErrors.EventInactive();
-        if (ticketType.typeId == 0) revert EventChainErrors.TicketTypeNotFound();
-        if (!ticketType.active) revert EventChainErrors.TicketTypeInactive();
-        if (block.timestamp < ticketType.saleStartTime) revert EventChainErrors.SaleNotStarted();
-        if (block.timestamp > ticketType.saleEndTime) revert EventChainErrors.SaleEnded();
-
-        uint256 userPurchased = _userEventPurchases[msg.sender][eventId];
-        if (userPurchased + quantity > MAX_TICKETS_PER_USER) {
-            revert EventChainErrors.PurchaseLimitExceeded();
-        }
-
-        if (ticketType.sold + quantity > ticketType.totalSupply) {
-            revert EventChainErrors.TicketsSoldOut();
-        }
-
-        uint256 totalCost = ticketType.price * quantity;
+        uint256 totalCost = pricePerTicket * quantity;
         if (msg.value != totalCost) revert EventChainErrors.InsufficientPayment();
 
-        for (uint256 i; i < quantity;) {
-            unchecked {
-                ++_currentTicketId;
-            }
-            uint256 ticketId = _currentTicketId;
+        _validatePercentages(percentages);
 
-            _createTicket(ticketId, eventId, typeId);
+        uint256 taxAmount = (msg.value * TAX_PERCENTAGE) / BASIS_POINTS;
+        uint256 netAmount = msg.value - taxAmount;
+
+        uint256[] memory ticketIds = new uint256[](quantity);
+
+        for (uint256 i; i < quantity;) {
+            unchecked { ++_currentTicketId; }
+            uint256 ticketId = _currentTicketId;
+            ticketIds[i] = ticketId;
+
+            _createTicket(ticketId, eventId, typeId, pricePerTicket);
             _safeMint(msg.sender, ticketId);
             _userTickets[msg.sender].push(ticketId);
 
-            emit TicketMinted(ticketId, eventId, typeId, msg.sender);
+            emit TicketMinted(ticketId, eventId, typeId, msg.sender, pricePerTicket);
 
             unchecked { ++i; }
         }
 
-        unchecked {
-            ticketType.sold += quantity;
-            _userEventPurchases[msg.sender][eventId] += quantity;
-        }
+        _userEventTicketCount[msg.sender][eventId] += quantity;
 
-        _distributeRevenue(eventId, msg.value);
+        _distributeRevenue(eventId, taxAmount, netAmount, beneficiaries, percentages);
 
-        emit TicketsPurchased(eventId, typeId, msg.sender, quantity, totalCost);
+        emit TicketsPurchased(eventId, typeId, msg.sender, quantity, totalCost, taxAmount, ticketIds);
+        return ticketIds;
     }
 
     function listTicketForResale(
@@ -240,12 +144,10 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
 
         if (ticket.isUsed) revert EventChainErrors.TicketAlreadyUsed();
         if (ticket.isForResale) revert EventChainErrors.TicketAlreadyListed();
-        if (ticket.resaleCount >= MAX_RESALE_COUNT) revert EventChainErrors.ResaleLimitReached();
+        if (ticket.resaleCount >= 1) revert EventChainErrors.ResaleLimitReached();
         if (resaleDeadline <= block.timestamp) revert EventChainErrors.InvalidDate();
 
-        uint256 originalPrice = _ticketTypes[ticket.eventId][ticket.typeId].price;
-        uint256 maxPrice = (originalPrice * MAX_RESALE_PERCENTAGE) / 100;
-
+        uint256 maxPrice = (ticket.originalPrice * MAX_RESALE_PERCENTAGE) / 100;
         if (resalePrice == 0 || resalePrice > maxPrice) {
             revert EventChainErrors.ResalePriceExceedsLimit();
         }
@@ -257,10 +159,17 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
         _resaleTicketIds.push(ticketId);
         _resaleTicketIndex[ticketId] = _resaleTicketIds.length - 1;
 
-        emit TicketListedForResale(ticketId, resalePrice, resaleDeadline);
+        emit TicketListedForResale(ticketId, ticket.eventId, msg.sender, resalePrice, resaleDeadline);
     }
 
-    function buyResaleTicket(uint256 ticketId) external payable ticketExists(ticketId) nonReentrant {
+    function buyResaleTicket(uint256 ticketId)
+        external
+        payable
+        ticketExists(ticketId)
+        nonReentrant
+    {
+        if (_eoAddresses[msg.sender]) revert EventChainErrors.EOCannotBuyTickets();
+        
         EventChainTypes.Ticket storage ticket = _tickets[ticketId];
 
         if (!ticket.isForResale) revert EventChainErrors.TicketNotForResale();
@@ -271,27 +180,27 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
         address previousOwner = ownerOf(ticketId);
         uint256 eventId = ticket.eventId;
 
-        _processResalePayment(eventId, previousOwner, msg.value);
+        uint256 taxAmount = (msg.value * TAX_PERCENTAGE) / BASIS_POINTS;
+        uint256 netAmount = msg.value - taxAmount;
+
+        _processResalePayment(eventId, previousOwner, taxAmount, netAmount);
         _transferTicket(ticketId, previousOwner, msg.sender);
 
         ticket.currentOwner = msg.sender;
         ticket.isForResale = false;
         ticket.resalePrice = 0;
         ticket.resaleDeadline = 0;
-        unchecked {
-            ++ticket.resaleCount;
-        }
+        unchecked { ++ticket.resaleCount; }
 
         _removeFromResaleList(ticketId);
 
-        emit TicketResold(ticketId, previousOwner, msg.sender, msg.value);
+        emit TicketResold(ticketId, eventId, previousOwner, msg.sender, msg.value, taxAmount);
     }
 
     function cancelResaleListing(uint256 ticketId) external ticketExists(ticketId) {
         if (ownerOf(ticketId) != msg.sender) revert EventChainErrors.Unauthorized();
 
         EventChainTypes.Ticket storage ticket = _tickets[ticketId];
-
         if (!ticket.isForResale) revert EventChainErrors.TicketNotForResale();
 
         ticket.isForResale = false;
@@ -300,42 +209,54 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
 
         _removeFromResaleList(ticketId);
 
-        emit ResaleListingCancelled(ticketId);
+        emit ResaleListingCancelled(ticketId, msg.sender);
     }
 
-    function useTicket(uint256 ticketId, uint256 eventId)
-        external
-        ticketExists(ticketId)
-        eventExists(eventId)
-        onlyEventCreator(eventId)
-    {
+    function useTicket(
+        uint256 ticketId,
+        uint256 eventId,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external ticketExists(ticketId) {
         EventChainTypes.Ticket storage ticket = _tickets[ticketId];
 
-        if (ticket.eventId != eventId) revert EventChainErrors.EventNotFound();
+        if (ticket.eventId != eventId) revert EventChainErrors.InvalidEvent();
         if (ticket.isUsed) revert EventChainErrors.TicketAlreadyUsed();
+        if (block.timestamp > deadline) revert EventChainErrors.SignatureExpired();
+        if (_usedNonces[ticketId][nonce]) revert EventChainErrors.NonceAlreadyUsed();
+
+        _verifyBackendSignature(ticketId, eventId, msg.sender, nonce, deadline, signature);
 
         ticket.isUsed = true;
         ticket.usedAt = block.timestamp;
+        _usedNonces[ticketId][nonce] = true;
 
-        emit TicketUsed(ticketId, eventId, ticket.currentOwner);
+        emit TicketUsed(ticketId, eventId, ticket.currentOwner, block.timestamp);
     }
 
-    function deactivateEvent(uint256 eventId)
-        external
-        eventExists(eventId)
-        onlyEventCreator(eventId)
-    {
-        _events[eventId].eventActive = false;
-        emit EventDeactivated(eventId);
+    function withdraw() external nonReentrant {
+        uint256 amount = _pendingWithdrawals[msg.sender];
+        if (amount == 0) revert EventChainErrors.NoBalanceToWithdraw();
+
+        _pendingWithdrawals[msg.sender] = 0;
+
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        if (!success) {
+            _pendingWithdrawals[msg.sender] = amount;
+            revert EventChainErrors.TransferFailed();
+        }
+
+        emit Withdrawn(msg.sender, amount);
     }
 
-    function getEventDetails(uint256 eventId)
-        external
-        view
-        eventExists(eventId)
-        returns (EventChainTypes.Event memory)
-    {
-        return _events[eventId];
+    function setTokenURI(uint256 ticketId, string calldata uri) external onlyOwner ticketExists(ticketId) {
+        _tokenURIs[ticketId] = uri;
+        emit TokenURIUpdated(ticketId, uri);
+    }
+
+    function tokenURI(uint256 ticketId) public view override ticketExists(ticketId) returns (string memory) {
+        return _tokenURIs[ticketId];
     }
 
     function getTicketDetails(uint256 ticketId)
@@ -347,36 +268,6 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
         return _tickets[ticketId];
     }
 
-    function getTicketType(uint256 eventId, uint256 typeId)
-        external
-        view
-        eventExists(eventId)
-        returns (EventChainTypes.TicketType memory)
-    {
-        return _ticketTypes[eventId][typeId];
-    }
-
-    function getEventTicketTypes(uint256 eventId)
-        external
-        view
-        eventExists(eventId)
-        returns (uint256[] memory)
-    {
-        return _eventTicketTypes[eventId];
-    }
-
-    function getRevenueShares(uint256 eventId)
-        external
-        view
-        returns (EventChainTypes.RevenueShare[] memory)
-    {
-        return _revenueShares[eventId];
-    }
-
-    function getEOEvents(address eo) external view returns (uint256[] memory) {
-        return _eoEvents[eo];
-    }
-
     function getResaleTickets() external view returns (uint256[] memory) {
         return _resaleTicketIds;
     }
@@ -385,12 +276,16 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
         return _userTickets[user];
     }
 
-    function getUserPurchaseCount(address user, uint256 eventId)
-        external
-        view
-        returns (uint256)
-    {
-        return _userEventPurchases[user][eventId];
+    function getUserEventTicketCount(address user, uint256 eventId) external view returns (uint256) {
+        return _userEventTicketCount[user][eventId];
+    }
+
+    function getPendingWithdrawal(address user) external view returns (uint256) {
+        return _pendingWithdrawals[user];
+    }
+
+    function getTicketTypePrice(uint256 eventId, uint256 typeId) external view returns (uint256) {
+        return _ticketTypePrices[eventId][typeId];
     }
 
     function canResell(uint256 ticketId)
@@ -399,7 +294,7 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
         ticketExists(ticketId)
         returns (bool)
     {
-        return _tickets[ticketId].resaleCount < MAX_RESALE_COUNT;
+        return _tickets[ticketId].resaleCount < 1 && !_tickets[ticketId].isUsed;
     }
 
     function getMaxResalePrice(uint256 ticketId)
@@ -408,24 +303,15 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
         ticketExists(ticketId)
         returns (uint256)
     {
-        uint256 eventId = _tickets[ticketId].eventId;
-        uint256 typeId = _tickets[ticketId].typeId;
-        uint256 originalPrice = _ticketTypes[eventId][typeId].price;
-        return (originalPrice * MAX_RESALE_PERCENTAGE) / 100;
+        return (_tickets[ticketId].originalPrice * MAX_RESALE_PERCENTAGE) / 100;
     }
 
-    function isAdmin(address user) external view returns (bool) {
-        return admins[user] || user == _contractOwner;
+    function getEventCreator(uint256 eventId) external view returns (address) {
+        return _eventCreators[eventId];
     }
 
-    function tokenURI(uint256 ticketId)
-        public
-        view
-        override
-        ticketExists(ticketId)
-        returns (string memory)
-    {
-        return _events[_tickets[ticketId].eventId].eventURI;
+    function isEventFinalized(uint256 eventId) external view returns (bool) {
+        return _eventFinalized[eventId];
     }
 
     function _validatePercentages(uint256[] calldata percentages) internal pure {
@@ -437,32 +323,21 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
             unchecked { ++i; }
         }
 
-        if (totalPercentage != BASIS_POINTS) revert EventChainErrors.InvalidPercentage();
+        if (totalPercentage != BASIS_POINTS) revert EventChainErrors.InvalidAmount();
     }
 
-    function _setupRevenueShares(
+    function _createTicket(
+        uint256 ticketId,
         uint256 eventId,
-        address[] calldata beneficiaries,
-        uint256[] calldata percentages
+        uint256 typeId,
+        uint256 price
     ) internal {
-        uint256 length = beneficiaries.length;
-        for (uint256 i; i < length;) {
-            _revenueShares[eventId].push(
-                EventChainTypes.RevenueShare({
-                    beneficiary: beneficiaries[i],
-                    percentage: percentages[i]
-                })
-            );
-            unchecked { ++i; }
-        }
-    }
-
-    function _createTicket(uint256 ticketId, uint256 eventId, uint256 typeId) internal {
         _tickets[ticketId] = EventChainTypes.Ticket({
             ticketId: ticketId,
             eventId: eventId,
             typeId: typeId,
             currentOwner: msg.sender,
+            originalPrice: price,
             isUsed: false,
             mintedAt: block.timestamp,
             usedAt: 0,
@@ -473,44 +348,54 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
         });
     }
 
-    function _distributeRevenue(uint256 eventId, uint256 amount) internal {
-        EventChainTypes.RevenueShare[] storage shares = _revenueShares[eventId];
-        uint256 length = shares.length;
+    function _distributeRevenue(
+        uint256 eventId,
+        uint256 taxAmount,
+        uint256 netAmount,
+        address[] calldata beneficiaries,
+        uint256[] calldata percentages
+    ) internal {
+        address taxWallet = _taxWallets[eventId];
+        _pendingWithdrawals[taxWallet] += taxAmount;
 
+        uint256 length = beneficiaries.length;
         for (uint256 i; i < length;) {
-            uint256 share = (amount * shares[i].percentage) / BASIS_POINTS;
-            _safeTransfer(shares[i].beneficiary, share);
+            uint256 share = (netAmount * percentages[i]) / BASIS_POINTS;
+            _pendingWithdrawals[beneficiaries[i]] += share;
             unchecked { ++i; }
         }
+
+        emit RevenueDistributed(eventId, msg.value, taxAmount, netAmount, block.timestamp);
     }
 
     function _processResalePayment(
         uint256 eventId,
         address seller,
-        uint256 amount
+        uint256 taxAmount,
+        uint256 netAmount
     ) internal {
-        uint256 creatorFee = (amount * CREATOR_ROYALTY) / BASIS_POINTS;
-        uint256 platformFee = (amount * PLATFORM_FEE) / BASIS_POINTS;
-        uint256 sellerProceeds = amount - creatorFee - platformFee;
+        address taxWallet = _taxWallets[eventId];
+        address creator = _eventCreators[eventId];
 
-        _safeTransfer(_events[eventId].eventCreator, creatorFee);
+        _pendingWithdrawals[taxWallet] += taxAmount;
+
+        uint256 creatorFee = (netAmount * CREATOR_ROYALTY) / BASIS_POINTS;
+        uint256 platformFee = (netAmount * PLATFORM_FEE) / BASIS_POINTS;
+        uint256 sellerProceeds = netAmount - creatorFee - platformFee;
+
+        _pendingWithdrawals[creator] += creatorFee;
 
         if (platformWallet != address(0)) {
-            _safeTransfer(platformWallet, platformFee);
+            _pendingWithdrawals[platformWallet] += platformFee;
         }
 
-        _safeTransfer(seller, sellerProceeds);
+        _pendingWithdrawals[seller] += sellerProceeds;
     }
 
     function _transferTicket(uint256 ticketId, address from, address to) internal {
         _transfer(from, to, ticketId);
         _removeFromUserTickets(from, ticketId);
         _userTickets[to].push(ticketId);
-    }
-
-    function _safeTransfer(address to, uint256 amount) internal {
-        (bool success, ) = payable(to).call{value: amount}("");
-        if (!success) revert EventChainErrors.TransferFailed();
     }
 
     function _removeFromResaleList(uint256 ticketId) internal {
@@ -538,6 +423,26 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainModifiers, EventChainE
                 break;
             }
             unchecked { ++i; }
+        }
+    }
+
+    function _verifyBackendSignature(
+        uint256 ticketId,
+        uint256 eventId,
+        address scanner,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) internal view {
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(ticketId, eventId, scanner, nonce, deadline, block.chainid)
+        );
+        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
+
+        address recoveredSigner = ethSignedMessageHash.recover(signature);
+
+        if (recoveredSigner != backendSigner) {
+            revert EventChainErrors.InvalidSignature();
         }
     }
 }
