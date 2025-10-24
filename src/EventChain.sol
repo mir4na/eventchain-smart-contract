@@ -2,8 +2,9 @@
 pragma solidity ^0.8.30;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDA.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {EventChainStorage} from "./EventChainStorage.sol";
 import {EventChainModifiers} from "./EventChainModifiers.sol";
 import {EventChainEvents} from "./EventChainEvents.sol";
@@ -60,7 +61,11 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         if (eventCreator == address(0)) revert EventChainErrors.InvalidAddress();
         if (taxWallet == address(0)) revert EventChainErrors.InvalidAddress();
         if (_eventCreators[eventId] != address(0)) revert EventChainErrors.EventAlreadyConfigured();
-        if (!_eoAddresses[eventCreator]) revert EventChainErrors.NotEventOrganizer();
+
+        if (!_eoAddresses[eventCreator]) {
+            _eoAddresses[eventCreator] = true;
+            emit EORegistered(eventCreator);
+        }
 
         _eventCreators[eventId] = eventCreator;
         _taxWallets[eventId] = taxWallet;
@@ -102,12 +107,12 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         if (pricePerTicket == 0) revert EventChainErrors.TicketTypeNotConfigured();
 
         uint256 totalCost = pricePerTicket * quantity;
-        if (msg.value != totalCost) revert EventChainErrors.InsufficientPayment();
+        if (msg.value < totalCost) revert EventChainErrors.InsufficientPayment();
 
         _validatePercentages(percentages);
 
-        uint256 taxAmount = (msg.value * TAX_PERCENTAGE) / BASIS_POINTS;
-        uint256 netAmount = msg.value - taxAmount;
+        uint256 taxAmount = (totalCost * TAX_PERCENTAGE) / BASIS_POINTS;
+        uint256 netAmount = totalCost - taxAmount;
 
         uint256[] memory ticketIds = new uint256[](quantity);
 
@@ -128,6 +133,12 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         _userEventTicketCount[msg.sender][eventId] += quantity;
 
         _distributeRevenue(eventId, taxAmount, netAmount, beneficiaries, percentages);
+
+        if (msg.value > totalCost) {
+            uint256 refund = msg.value - totalCost;
+            (bool success, ) = payable(msg.sender).call{value: refund}("");
+            if (!success) revert EventChainErrors.TransferFailed();
+        }
 
         emit TicketsPurchased(eventId, typeId, msg.sender, quantity, totalCost, taxAmount, ticketIds);
         return ticketIds;
@@ -437,9 +448,9 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         bytes32 messageHash = keccak256(
             abi.encodePacked(ticketId, eventId, scanner, nonce, deadline, block.chainid)
         );
-        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
 
-        address recoveredSigner = ethSignedMessageHash.recover(signature);
+        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
+        address recoveredSigner = ECDSA.recover(ethSignedMessageHash, signature);
 
         if (recoveredSigner != backendSigner) {
             revert EventChainErrors.InvalidSignature();

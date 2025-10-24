@@ -40,7 +40,7 @@ contract EventChainTest is Test {
         eventChain = new EventChain(platform, backendSigner);
     }
 
-    function test_Deployment() public {
+    function test_Deployment() view public {
         assertEq(eventChain.platformWallet(), platform);
         assertEq(eventChain.backendSigner(), backendSigner);
     }
