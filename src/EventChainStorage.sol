@@ -12,7 +12,7 @@ abstract contract EventChainStorage {
     uint256 public constant PLATFORM_FEE = 250;
     uint256 public constant CREATOR_ROYALTY = 500;
     uint256 public constant MAX_RESALE_PERCENTAGE = 120;
-    uint256 public constant BASIS_POINTS = 10000;
+    uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant MAX_TICKETS_PER_PURCHASE = 5;
 
     uint256 internal _currentTicketId;

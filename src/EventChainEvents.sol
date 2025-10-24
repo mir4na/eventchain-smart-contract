@@ -12,9 +12,7 @@ abstract contract EventChainEvents {
     event EORemoved(address indexed eoAddress);
 
     event RevenueConfigured(
-        uint256 indexed eventId,
-        address indexed creator,
-        address indexed taxWallet
+        uint256 indexed eventId, address indexed creator, address indexed taxWallet
     );
 
     event TicketMinted(
@@ -52,16 +50,10 @@ abstract contract EventChainEvents {
         uint256 taxAmount
     );
 
-    event ResaleListingCancelled(
-        uint256 indexed ticketId,
-        address indexed seller
-    );
+    event ResaleListingCancelled(uint256 indexed ticketId, address indexed seller);
 
     event TicketUsed(
-        uint256 indexed ticketId,
-        uint256 indexed eventId,
-        address indexed user,
-        uint256 timestamp
+        uint256 indexed ticketId, uint256 indexed eventId, address indexed user, uint256 timestamp
     );
 
     event RevenueDistributed(

@@ -40,7 +40,7 @@ contract EventChainTest is Test {
         eventChain = new EventChain(platform, backendSigner);
     }
 
-    function test_Deployment() view public {
+    function test_Deployment() public view {
         assertEq(eventChain.platformWallet(), platform);
         assertEq(eventChain.backendSigner(), backendSigner);
     }
@@ -54,7 +54,7 @@ contract EventChainTest is Test {
     function test_BuyTickets() public {
         vm.prank(owner);
         eventChain.configureEvent(EVENT_ID, eventCreator, taxWallet);
-        
+
         vm.prank(owner);
         eventChain.setTicketTypePrice(EVENT_ID, TICKET_TYPE_REGULAR, TICKET_PRICE);
 
@@ -70,13 +70,9 @@ contract EventChainTest is Test {
         percentages[1] = 2000;
 
         vm.prank(buyer1);
-        uint256[] memory ticketIds = eventChain.buyTickets{value: totalCost}(
-            EVENT_ID,
-            TICKET_TYPE_REGULAR,
-            quantity,
-            beneficiaries,
-            percentages
-        );
+        uint256[] memory ticketIds = eventChain.buyTickets{
+            value: totalCost
+        }(EVENT_ID, TICKET_TYPE_REGULAR, quantity, beneficiaries, percentages);
 
         assertEq(ticketIds.length, quantity);
         assertEq(eventChain.ownerOf(ticketIds[0]), buyer1);
@@ -90,7 +86,7 @@ contract EventChainTest is Test {
     function test_BuyMaxTickets() public {
         vm.prank(owner);
         eventChain.configureEvent(EVENT_ID, eventCreator, taxWallet);
-        
+
         vm.prank(owner);
         eventChain.setTicketTypePrice(EVENT_ID, TICKET_TYPE_REGULAR, TICKET_PRICE);
 
@@ -106,13 +102,9 @@ contract EventChainTest is Test {
         percentages[1] = 2000;
 
         vm.prank(buyer1);
-        uint256[] memory ticketIds = eventChain.buyTickets{value: totalCost}(
-            EVENT_ID,
-            TICKET_TYPE_REGULAR,
-            quantity,
-            beneficiaries,
-            percentages
-        );
+        uint256[] memory ticketIds = eventChain.buyTickets{
+            value: totalCost
+        }(EVENT_ID, TICKET_TYPE_REGULAR, quantity, beneficiaries, percentages);
 
         assertEq(ticketIds.length, quantity);
     }
@@ -120,7 +112,7 @@ contract EventChainTest is Test {
     function test_BuyExceedingMaxTickets() public {
         vm.prank(owner);
         eventChain.configureEvent(EVENT_ID, eventCreator, taxWallet);
-        
+
         vm.prank(owner);
         eventChain.setTicketTypePrice(EVENT_ID, TICKET_TYPE_REGULAR, TICKET_PRICE);
 
@@ -137,19 +129,15 @@ contract EventChainTest is Test {
 
         vm.prank(buyer1);
         vm.expectRevert("MaxTicketsExceeded()");
-        eventChain.buyTickets{value: totalCost}(
-            EVENT_ID,
-            TICKET_TYPE_REGULAR,
-            quantity,
-            beneficiaries,
-            percentages
-        );
+        eventChain.buyTickets{
+            value: totalCost
+        }(EVENT_ID, TICKET_TYPE_REGULAR, quantity, beneficiaries, percentages);
     }
 
     function test_ListAndBuyResaleTicket() public {
         vm.prank(owner);
         eventChain.configureEvent(EVENT_ID, eventCreator, taxWallet);
-        
+
         vm.prank(owner);
         eventChain.setTicketTypePrice(EVENT_ID, TICKET_TYPE_REGULAR, TICKET_PRICE);
 
@@ -162,13 +150,9 @@ contract EventChainTest is Test {
         percentages[1] = 2000;
 
         vm.prank(buyer1);
-        uint256[] memory ids = eventChain.buyTickets{value: TICKET_PRICE}(
-            EVENT_ID,
-            TICKET_TYPE_REGULAR,
-            1,
-            beneficiaries,
-            percentages
-        );
+        uint256[] memory ids = eventChain.buyTickets{
+            value: TICKET_PRICE
+        }(EVENT_ID, TICKET_TYPE_REGULAR, 1, beneficiaries, percentages);
         uint256 ticketId = ids[0];
 
         uint256 resalePrice = (TICKET_PRICE * 110) / 100;

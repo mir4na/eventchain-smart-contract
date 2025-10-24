@@ -11,13 +11,18 @@ import {EventChainEvents} from "./EventChainEvents.sol";
 import {EventChainTypes} from "./EventChainTypes.sol";
 import {EventChainErrors} from "./EventChainErrors.sol";
 
-contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainModifiers, EventChainEvents {
+contract EventChain is
+    ERC721,
+    ReentrancyGuard,
+    EventChainStorage,
+    EventChainModifiers,
+    EventChainEvents
+{
     using ECDSA for bytes32;
 
-    constructor(
-        address _platformWallet,
-        address _backendSigner
-    ) ERC721("EventChain Ticket", "EVTKT") {
+    constructor(address _platformWallet, address _backendSigner)
+        ERC721("EventChain Ticket", "EVTKT")
+    {
         if (_platformWallet == address(0)) revert EventChainErrors.InvalidAddress();
         if (_backendSigner == address(0)) revert EventChainErrors.InvalidAddress();
 
@@ -53,14 +58,16 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         return _eoAddresses[account];
     }
 
-    function configureEvent(
-        uint256 eventId,
-        address eventCreator,
-        address taxWallet
-    ) external onlyOwner returns (bool) {
+    function configureEvent(uint256 eventId, address eventCreator, address taxWallet)
+        external
+        onlyOwner
+        returns (bool)
+    {
         if (eventCreator == address(0)) revert EventChainErrors.InvalidAddress();
         if (taxWallet == address(0)) revert EventChainErrors.InvalidAddress();
-        if (_eventCreators[eventId] != address(0)) revert EventChainErrors.EventAlreadyConfigured();
+        if (_eventCreators[eventId] != address(0)) {
+            revert EventChainErrors.EventAlreadyConfigured();
+        }
 
         if (!_eoAddresses[eventCreator]) {
             _eoAddresses[eventCreator] = true;
@@ -75,11 +82,12 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         return true;
     }
 
-    function setTicketTypePrice(
-        uint256 eventId,
-        uint256 typeId,
-        uint256 price
-    ) external onlyOwner eventConfigured(eventId) eventNotFinalized(eventId) {
+    function setTicketTypePrice(uint256 eventId, uint256 typeId, uint256 price)
+        external
+        onlyOwner
+        eventConfigured(eventId)
+        eventNotFinalized(eventId)
+    {
         if (price == 0) revert EventChainErrors.InvalidAmount();
 
         _ticketTypePrices[eventId][typeId] = price;
@@ -99,8 +107,18 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         uint256 quantity,
         address[] calldata beneficiaries,
         uint256[] calldata percentages
-    ) external payable nonReentrant eventConfigured(eventId) eventNotFinalized(eventId) withinPurchaseLimit(eventId, quantity) returns (uint256[] memory) {
-        if (_eoAddresses[msg.sender]) revert EventChainErrors.EOCannotBuyTickets();
+    )
+        external
+        payable
+        nonReentrant
+        eventConfigured(eventId)
+        eventNotFinalized(eventId)
+        withinPurchaseLimit(eventId, quantity)
+        returns (uint256[] memory)
+    {
+        if (_eoAddresses[msg.sender]) {
+            revert EventChainErrors.EOCannotBuyTickets();
+        }
         if (beneficiaries.length != percentages.length) revert EventChainErrors.InvalidAmount();
 
         uint256 pricePerTicket = _ticketTypePrices[eventId][typeId];
@@ -117,7 +135,9 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         uint256[] memory ticketIds = new uint256[](quantity);
 
         for (uint256 i; i < quantity;) {
-            unchecked { ++_currentTicketId; }
+            unchecked {
+                ++_currentTicketId;
+            }
             uint256 ticketId = _currentTicketId;
             ticketIds[i] = ticketId;
 
@@ -127,7 +147,9 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
 
             emit TicketMinted(ticketId, eventId, typeId, msg.sender, pricePerTicket);
 
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         _userEventTicketCount[msg.sender][eventId] += quantity;
@@ -136,19 +158,20 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
 
         if (msg.value > totalCost) {
             uint256 refund = msg.value - totalCost;
-            (bool success, ) = payable(msg.sender).call{value: refund}("");
+            (bool success,) = payable(msg.sender).call{value: refund}("");
             if (!success) revert EventChainErrors.TransferFailed();
         }
 
-        emit TicketsPurchased(eventId, typeId, msg.sender, quantity, totalCost, taxAmount, ticketIds);
+        emit TicketsPurchased(
+            eventId, typeId, msg.sender, quantity, totalCost, taxAmount, ticketIds
+        );
         return ticketIds;
     }
 
-    function listTicketForResale(
-        uint256 ticketId,
-        uint256 resalePrice,
-        uint256 resaleDeadline
-    ) external ticketExists(ticketId) {
+    function listTicketForResale(uint256 ticketId, uint256 resalePrice, uint256 resaleDeadline)
+        external
+        ticketExists(ticketId)
+    {
         if (ownerOf(ticketId) != msg.sender) revert EventChainErrors.Unauthorized();
 
         EventChainTypes.Ticket storage ticket = _tickets[ticketId];
@@ -170,7 +193,9 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         _resaleTicketIds.push(ticketId);
         _resaleTicketIndex[ticketId] = _resaleTicketIds.length - 1;
 
-        emit TicketListedForResale(ticketId, ticket.eventId, msg.sender, resalePrice, resaleDeadline);
+        emit TicketListedForResale(
+            ticketId, ticket.eventId, msg.sender, resalePrice, resaleDeadline
+        );
     }
 
     function buyResaleTicket(uint256 ticketId)
@@ -180,13 +205,15 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         nonReentrant
     {
         if (_eoAddresses[msg.sender]) revert EventChainErrors.EOCannotBuyTickets();
-        
+
         EventChainTypes.Ticket storage ticket = _tickets[ticketId];
 
         if (!ticket.isForResale) revert EventChainErrors.TicketNotForResale();
         if (msg.value != ticket.resalePrice) revert EventChainErrors.InsufficientPayment();
         if (ticket.isUsed) revert EventChainErrors.TicketAlreadyUsed();
-        if (block.timestamp > ticket.resaleDeadline) revert EventChainErrors.ResaleDeadlinePassed();
+        if (block.timestamp > ticket.resaleDeadline) {
+            revert EventChainErrors.ResaleDeadlinePassed();
+        }
 
         address previousOwner = ownerOf(ticketId);
         uint256 eventId = ticket.eventId;
@@ -201,7 +228,9 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         ticket.isForResale = false;
         ticket.resalePrice = 0;
         ticket.resaleDeadline = 0;
-        unchecked { ++ticket.resaleCount; }
+        unchecked {
+            ++ticket.resaleCount;
+        }
 
         _removeFromResaleList(ticketId);
 
@@ -252,7 +281,7 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
 
         _pendingWithdrawals[msg.sender] = 0;
 
-        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        (bool success,) = payable(msg.sender).call{value: amount}("");
         if (!success) {
             _pendingWithdrawals[msg.sender] = amount;
             revert EventChainErrors.TransferFailed();
@@ -261,12 +290,22 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         emit Withdrawn(msg.sender, amount);
     }
 
-    function setTokenURI(uint256 ticketId, string calldata uri) external onlyOwner ticketExists(ticketId) {
+    function setTokenURI(uint256 ticketId, string calldata uri)
+        external
+        onlyOwner
+        ticketExists(ticketId)
+    {
         _tokenURIs[ticketId] = uri;
         emit TokenURIUpdated(ticketId, uri);
     }
 
-    function tokenURI(uint256 ticketId) public view override ticketExists(ticketId) returns (string memory) {
+    function tokenURI(uint256 ticketId)
+        public
+        view
+        override
+        ticketExists(ticketId)
+        returns (string memory)
+    {
         return _tokenURIs[ticketId];
     }
 
@@ -287,7 +326,11 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         return _userTickets[user];
     }
 
-    function getUserEventTicketCount(address user, uint256 eventId) external view returns (uint256) {
+    function getUserEventTicketCount(address user, uint256 eventId)
+        external
+        view
+        returns (uint256)
+    {
         return _userEventTicketCount[user][eventId];
     }
 
@@ -299,12 +342,7 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         return _ticketTypePrices[eventId][typeId];
     }
 
-    function canResell(uint256 ticketId)
-        external
-        view
-        ticketExists(ticketId)
-        returns (bool)
-    {
+    function canResell(uint256 ticketId) external view ticketExists(ticketId) returns (bool) {
         return _tickets[ticketId].resaleCount < 1 && !_tickets[ticketId].isUsed;
     }
 
@@ -331,18 +369,17 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
 
         for (uint256 i; i < length;) {
             totalPercentage += percentages[i];
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         if (totalPercentage != BASIS_POINTS) revert EventChainErrors.InvalidAmount();
     }
 
-    function _createTicket(
-        uint256 ticketId,
-        uint256 eventId,
-        uint256 typeId,
-        uint256 price
-    ) internal {
+    function _createTicket(uint256 ticketId, uint256 eventId, uint256 typeId, uint256 price)
+        internal
+    {
         _tickets[ticketId] = EventChainTypes.Ticket({
             ticketId: ticketId,
             eventId: eventId,
@@ -373,7 +410,9 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         for (uint256 i; i < length;) {
             uint256 share = (netAmount * percentages[i]) / BASIS_POINTS;
             _pendingWithdrawals[beneficiaries[i]] += share;
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         emit RevenueDistributed(eventId, msg.value, taxAmount, netAmount, block.timestamp);
@@ -433,7 +472,9 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
                 userTickets.pop();
                 break;
             }
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
