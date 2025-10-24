@@ -27,6 +27,7 @@ abstract contract EventChainStorage {
     mapping(uint256 => mapping(uint256 => bool)) internal _usedNonces;
     mapping(uint256 => string) internal _tokenURIs;
     mapping(address => uint256) internal _pendingWithdrawals;
+    mapping(address => bool) internal _eoAddresses;
 
     uint256[] internal _resaleTicketIds;
     mapping(uint256 => uint256) internal _resaleTicketIndex;

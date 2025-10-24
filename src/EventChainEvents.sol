@@ -8,6 +8,8 @@ abstract contract EventChainEvents {
     event TokenURIUpdated(uint256 indexed ticketId, string uri);
     event TicketTypePriceSet(uint256 indexed eventId, uint256 indexed typeId, uint256 price);
     event Withdrawn(address indexed user, uint256 amount);
+    event EORegistered(address indexed eoAddress);
+    event EORemoved(address indexed eoAddress);
 
     event RevenueConfigured(
         uint256 indexed eventId,

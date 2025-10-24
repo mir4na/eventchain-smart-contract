@@ -26,4 +26,6 @@ library EventChainErrors {
     error NonceAlreadyUsed();
     error TicketTypeNotConfigured();
     error NoBalanceToWithdraw();
+    error NotEventOrganizer();
+    error EOCannotBuyTickets();
 }

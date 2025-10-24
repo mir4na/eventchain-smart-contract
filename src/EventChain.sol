@@ -37,6 +37,21 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         emit BackendSignerUpdated(signer);
     }
 
+    function registerEO(address eoAddress) external onlyOwner {
+        if (eoAddress == address(0)) revert EventChainErrors.InvalidAddress();
+        _eoAddresses[eoAddress] = true;
+        emit EORegistered(eoAddress);
+    }
+
+    function removeEO(address eoAddress) external onlyOwner {
+        _eoAddresses[eoAddress] = false;
+        emit EORemoved(eoAddress);
+    }
+
+    function isEO(address account) external view returns (bool) {
+        return _eoAddresses[account];
+    }
+
     function configureEvent(
         uint256 eventId,
         address eventCreator,
@@ -45,6 +60,7 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         if (eventCreator == address(0)) revert EventChainErrors.InvalidAddress();
         if (taxWallet == address(0)) revert EventChainErrors.InvalidAddress();
         if (_eventCreators[eventId] != address(0)) revert EventChainErrors.EventAlreadyConfigured();
+        if (!_eoAddresses[eventCreator]) revert EventChainErrors.NotEventOrganizer();
 
         _eventCreators[eventId] = eventCreator;
         _taxWallets[eventId] = taxWallet;
@@ -60,14 +76,14 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         uint256 price
     ) external onlyOwner eventConfigured(eventId) eventNotFinalized(eventId) {
         if (price == 0) revert EventChainErrors.InvalidAmount();
-        
+
         _ticketTypePrices[eventId][typeId] = price;
         emit TicketTypePriceSet(eventId, typeId, price);
     }
 
     function finalizeEvent(uint256 eventId) external onlyOwner eventConfigured(eventId) {
         if (_eventFinalized[eventId]) revert EventChainErrors.EventAlreadyFinalized();
-        
+
         _eventFinalized[eventId] = true;
         emit EventFinalized(eventId);
     }
@@ -79,6 +95,7 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         address[] calldata beneficiaries,
         uint256[] calldata percentages
     ) external payable nonReentrant eventConfigured(eventId) eventNotFinalized(eventId) withinPurchaseLimit(eventId, quantity) returns (uint256[] memory) {
+        if (_eoAddresses[msg.sender]) revert EventChainErrors.EOCannotBuyTickets();
         if (beneficiaries.length != percentages.length) revert EventChainErrors.InvalidAmount();
 
         uint256 pricePerTicket = _ticketTypePrices[eventId][typeId];
@@ -151,6 +168,8 @@ contract EventChain is ERC721, ReentrancyGuard, EventChainStorage, EventChainMod
         ticketExists(ticketId)
         nonReentrant
     {
+        if (_eoAddresses[msg.sender]) revert EventChainErrors.EOCannotBuyTickets();
+        
         EventChainTypes.Ticket storage ticket = _tickets[ticketId];
 
         if (!ticket.isForResale) revert EventChainErrors.TicketNotForResale();
