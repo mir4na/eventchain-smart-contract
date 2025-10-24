@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDA.sol";
 import {EventChainStorage} from "./EventChainStorage.sol";
 import {EventChainModifiers} from "./EventChainModifiers.sol";
 import {EventChainEvents} from "./EventChainEvents.sol";
